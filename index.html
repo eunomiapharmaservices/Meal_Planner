@@ -161,6 +161,11 @@ function calcBurn(wkg,actId,mins,intId){
   const i=INTENSITY.find(x=>x.id===intId)||INTENSITY[1];
   return Math.round(a.met*i.mult*wkg*mins/60);
 }
+// meal slot helpers — each slot is now an array of items
+function slotItems(v){return Array.isArray(v)?v:(v?[v]:[]);}
+function slotKcal(v){return slotItems(v).reduce((s,i)=>s+(i?.calories||0),0);}
+function slotMacro(v,k){return slotItems(v).reduce((s,i)=>s+(i?.[k]||0),0);}
+
 async function claude(prompt,max=1200){
   const r=await fetch("https://api.anthropic.com/v1/messages",{
     method:"POST",headers:{"Content-Type":"application/json"},
@@ -453,29 +458,62 @@ function RecipeModal({meal,onClose,onAdd}){
   );
 }
 
-/* ─── Meal Cell ──────────────────────────────────────────────────────────────── */
-function MealCell({day,meal,value,onEdit,onRecipe}){
+/* ─── Meal Cell — supports multiple items per slot ───────────────────────────── */
+function MealCell({day,meal,value,onEdit,onRecipe,onRemoveItem,onClearSlot}){
   const[open,setOpen]=useState(false);
+  const items=slotItems(value);
+  const total=slotKcal(value);
+  const totalP=Math.round(slotMacro(value,"protein")*10)/10;
+  if(items.length===0){
+    return(
+      <div onClick={()=>onEdit(day,meal)}
+        style={{minHeight:64,padding:"10px 12px",borderRadius:10,border:"1px dashed "+C.border,background:C.surf,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{fontSize:11,color:C.border}}>+ Add</div>
+      </div>
+    );
+  }
   return(
     <div style={{position:"relative"}}>
-      <div onClick={()=>value?setOpen(o=>!o):onEdit(day,meal)}
-        style={{minHeight:64,padding:"10px 12px",borderRadius:10,border:"1px solid "+(value?C.dim:C.border),background:value?"#1a2e1a":C.surf,cursor:"pointer",display:"flex",flexDirection:"column",justifyContent:"center"}}>
-        {value?(
-          <>
-            <div style={{fontSize:12,fontWeight:600,color:C.text,lineHeight:1.3}}>{value.name}</div>
-            <div style={{fontSize:10,color:C.muted,marginTop:3}}>{value.calories} kcal{value.protein?" · P "+value.protein+"g":""}</div>
-            <div style={{fontSize:9,color:C.dim,marginTop:3}}>tap for options ›</div>
-          </>
-        ):(
-          <div style={{fontSize:11,color:C.border,textAlign:"center"}}>+ Add</div>
-        )}
+      <div style={{borderRadius:10,border:"1px solid "+C.dim,background:"#1a2e1a",overflow:"visible"}}>
+        {/* Items list */}
+        <div style={{padding:"8px 10px"}}>
+          {items.map((item,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:i<items.length-1?5:0}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.text,lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>
+                <div style={{fontSize:9,color:C.muted}}>{item.calories} kcal{item.protein?" · P "+item.protein+"g":""}</div>
+              </div>
+              <button onClick={(e)=>{e.stopPropagation();onRemoveItem(day,meal,i);}}
+                style={{background:"none",border:"none",color:C.border,fontSize:13,cursor:"pointer",padding:"2px 4px",flexShrink:0,lineHeight:1}}>✕</button>
+            </div>
+          ))}
+        </div>
+        {/* Footer: total + actions */}
+        <div style={{borderTop:"1px solid "+C.border+"66",display:"flex",alignItems:"center",padding:"6px 10px",gap:6}}>
+          <div style={{flex:1}}>
+            <span style={{fontSize:10,fontWeight:700,color:C.gold,fontFamily:"'DM Mono',monospace"}}>{total} kcal</span>
+            {totalP>0&&<span style={{fontSize:9,color:C.accent,marginLeft:6}}>P {totalP}g</span>}
+          </div>
+          <button onClick={()=>onEdit(day,meal)}
+            style={{fontSize:10,padding:"4px 8px",borderRadius:6,border:"1px solid "+C.dim,background:"none",color:C.accent,cursor:"pointer",fontWeight:600}}>+ Add</button>
+          <button onClick={()=>setOpen(o=>!o)}
+            style={{fontSize:10,padding:"4px 8px",borderRadius:6,border:"1px solid "+C.border,background:"none",color:C.muted,cursor:"pointer"}}>⋯</button>
+        </div>
       </div>
-      {open&&value&&<>
+      {/* Context menu */}
+      {open&&<>
         <div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,zIndex:49}}/>
         <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:C.card,borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.5)",marginTop:4}}>
-          <button onClick={()=>{setOpen(false);onRecipe(value);}} style={{width:"100%",padding:"12px 14px",background:"none",border:"none",color:C.text,fontSize:13,fontWeight:600,cursor:"pointer",textAlign:"left"}}>📖 View Recipe</button>
+          {items.map((item,i)=>(
+            <div key={i}>
+              <button onClick={()=>{setOpen(false);onRecipe(item);}} style={{width:"100%",padding:"11px 14px",background:"none",border:"none",color:C.text,fontSize:12,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{flex:1,fontWeight:600}}>{item.name}</span><span style={{color:C.muted,fontSize:11}}>📖 Recipe</span>
+              </button>
+              {i<items.length-1&&<div style={{height:1,background:C.border+"44"}}/>}
+            </div>
+          ))}
           <div style={{height:1,background:C.border}}/>
-          <button onClick={()=>{setOpen(false);onEdit(day,meal);}} style={{width:"100%",padding:"12px 14px",background:"none",border:"none",color:C.muted,fontSize:13,cursor:"pointer",textAlign:"left"}}>✏️ Change Meal</button>
+          <button onClick={()=>{setOpen(false);onClearSlot(day,meal);}} style={{width:"100%",padding:"11px 14px",background:"none",border:"none",color:C.danger,fontSize:12,cursor:"pointer",textAlign:"left"}}>🗑 Clear all {meal} items</button>
         </div>
       </>}
     </div>
@@ -686,7 +724,7 @@ function MealEditor({day,meal,profile,targets,onClose,onSave}){
       {recipe&&<RecipeModal meal={recipe} onClose={()=>setRecipe(null)} onAdd={m=>{onSave(m);onClose();}}/>}
       <div style={{background:C.card,borderRadius:20,padding:24,maxWidth:480,width:"100%",border:"1px solid "+C.border,maxHeight:"92vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-          <div><div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>{day}</div><div style={{fontSize:20,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif"}}>{meal}</div></div>
+          <div><div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>{day}</div><div style={{fontSize:20,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif"}}>Add to {meal}</div></div>
           <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer"}}>✕</button>
         </div>
         <div style={{display:"flex",marginBottom:20,borderRadius:12,overflow:"hidden",border:"1px solid "+C.border}}>
@@ -769,12 +807,12 @@ function Dashboard({profile,onBack,onEditProfile}){
   },[plan,targets,activities,shopList,checked]);
 
   const dayPlan=plan[activeDay]||{};
-  const dayKcal=Object.values(dayPlan).reduce((s,m)=>s+(m?.calories||0),0);
-  const weekKcal=DAYS.reduce((s,d)=>s+Object.values(plan[d]||{}).reduce((ms,m)=>ms+(m?.calories||0),0),0);
+  const dayKcal=Object.values(dayPlan).reduce((s,v)=>s+slotKcal(v),0);
+  const weekKcal=DAYS.reduce((s,d)=>s+Object.values(plan[d]||{}).reduce((ms,v)=>ms+slotKcal(v),0),0);
   const burned=activities.reduce((s,a)=>s+a.burned,0);
   const netKcal=dayKcal-burned;
   const macros={protein:0,carbs:0,fat:0};
-  Object.values(dayPlan).forEach(m=>{if(m){macros.protein+=m.protein||0;macros.carbs+=m.carbs||0;macros.fat+=m.fat||0;}});
+  Object.values(dayPlan).forEach(v=>{slotItems(v).forEach(m=>{if(m){macros.protein+=m.protein||0;macros.carbs+=m.carbs||0;macros.fat+=m.fat||0;}});});
   const goalInfo=GOALS.find(g=>g.id===profile.goal);
   const calPct=Math.min(100,Math.round((netKcal/targets.calories)*100));
   const calColor=netKcal>targets.calories?C.danger:calPct>85?C.accent:C.gold;
@@ -788,7 +826,7 @@ function Dashboard({profile,onBack,onEditProfile}){
   useEffect(()=>{getTip();},[]);
 
   const allMeals=[];
-  DAYS.forEach(d=>MEALS.forEach(m=>{if(plan[d]?.[m])allMeals.push({day:d,slot:m,...plan[d][m]});}));
+  DAYS.forEach(d=>MEALS.forEach(m=>{slotItems(plan[d]?.[m]).forEach(item=>allMeals.push({day:d,slot:m,...item}));}));
   const generateShopList=async()=>{
     if(!allMeals.length)return;
     setLoadingShop(true);
@@ -809,7 +847,7 @@ function Dashboard({profile,onBack,onEditProfile}){
       {viewRecipe&&<RecipeModal meal={viewRecipe} onClose={()=>setViewRecipe(null)}/>}
       {showAllowances&&<AllowancesEditor targets={targets} onSave={t=>setTargets(t)} onClose={()=>setShowAllowances(false)}/>}
       {showActivity&&<ActivityLogger weightKg={profile.weightKg} activities={activities} onAdd={a=>setActivities(p=>[...p,a])} onRemove={i=>setActivities(p=>p.filter((_,idx)=>idx!==i))} onClose={()=>setShowActivity(false)}/>}
-      {editing&&<MealEditor day={editing.day} meal={editing.meal} profile={profile} targets={targets} onClose={()=>setEditing(null)} onSave={m=>setPlan(p=>({...p,[editing.day]:{...(p[editing.day]||{}),[editing.meal]:m}}))}/>}
+      {editing&&<MealEditor day={editing.day} meal={editing.meal} profile={profile} targets={targets} onClose={()=>setEditing(null)} onSave={m=>setPlan(p=>{const slot=slotItems(p[editing.day]?.[editing.meal]);return{...p,[editing.day]:{...(p[editing.day]||{}),[editing.meal]:[...slot,m]}};})}/>}
 
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 0 16px",flexWrap:"wrap",gap:10}}>
@@ -883,7 +921,7 @@ function Dashboard({profile,onBack,onEditProfile}){
         <div style={{background:C.card,borderRadius:16,padding:20,border:"1px solid "+C.border}}>
           <div style={{fontSize:16,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif",marginBottom:16}}>{activeDay}'s Meals</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
-            {MEALS.map(m=><div key={m}><div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{m}</div><MealCell day={activeDay} meal={m} value={dayPlan[m]} onEdit={(d,ml)=>setEditing({day:d,meal:ml})} onRecipe={setViewRecipe}/></div>)}
+            {MEALS.map(m=><div key={m}><div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>{m}</div><MealCell day={activeDay} meal={m} value={dayPlan[m]} onEdit={(d,ml)=>setEditing({day:d,meal:ml})} onRecipe={setViewRecipe} onRemoveItem={(d,ml,i)=>setPlan(p=>{const slot=slotItems(p[d]?.[ml]).filter((_,idx)=>idx!==i);const updated={...p,[d]:{...(p[d]||{}),[ml]:slot.length?slot:undefined}};return updated;})} onClearSlot={(d,ml)=>setPlan(p=>({...p,[d]:{...(p[d]||{}),[ml]:undefined}}))}/></div>)}
           </div>
         </div>
       </>}
@@ -939,11 +977,11 @@ function Dashboard({profile,onBack,onEditProfile}){
       {/* Overview tab */}
       {tab==="overview"&&<div style={{background:C.card,borderRadius:16,padding:20,border:"1px solid "+C.border}}>
         <div style={{fontSize:16,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif",marginBottom:16}}>Weekly Overview</div>
-        {DAYS.map(d=>{const dCal=Object.values(plan[d]||{}).reduce((s,m)=>s+(m?.calories||0),0);const meals=Object.entries(plan[d]||{}).filter(([,v])=>v);const p=Math.min(100,Math.round((dCal/targets.calories)*100));const col=dCal>targets.calories?C.danger:p>85?C.accent:C.gold;return(
+        {DAYS.map(d=>{const dCal=Object.values(plan[d]||{}).reduce((s,v)=>s+slotKcal(v),0);const meals=Object.entries(plan[d]||{}).filter(([,v])=>slotItems(v).length>0);const p=Math.min(100,Math.round((dCal/targets.calories)*100));const col=dCal>targets.calories?C.danger:p>85?C.accent:C.gold;return(
           <div key={d} style={{background:C.surf,borderRadius:12,padding:"14px 16px",border:"1px solid "+C.border,marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontWeight:600,color:C.text,fontSize:14}}>{d}</span><span style={{fontSize:12,color:col,fontFamily:"'DM Mono',monospace"}}>{dCal} / {targets.calories} kcal</span></div>
             <div style={{height:4,borderRadius:2,background:C.card,overflow:"hidden",marginBottom:8}}><div style={{height:"100%",width:p+"%",background:col,borderRadius:2}}/></div>
-            {meals.length>0?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{meals.map(([mt,m])=><span key={mt} style={{fontSize:10,background:C.card,borderRadius:6,padding:"3px 8px",color:C.muted}}>{mt}: {m.name}</span>)}</div>:<span style={{fontSize:11,color:C.border}}>No meals planned</span>}
+            {meals.length>0?<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{meals.map(([mt,v])=>slotItems(v).map((m,i)=><span key={mt+i} style={{fontSize:10,background:C.card,borderRadius:6,padding:"3px 8px",color:C.muted}}>{i===0?mt+": ":""}{m.name}</span>))}</div>:<span style={{fontSize:11,color:C.border}}>No meals planned</span>}
           </div>
         );})}
       </div>}
