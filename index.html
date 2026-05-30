@@ -1100,6 +1100,7 @@ function Dashboard({profile,onBack,onEditProfile}){
   const[showActivity,setShowActivity]=useState(false);
   const[viewRecipe,setViewRecipe]=useState(null);
   const[loadingShop,setLoadingShop]=useState(false);
+  const[shopError,setShopError]=useState("");
   const[showCopy,setShowCopy]=useState(false);
 
   // Auto-save whenever key state changes
@@ -1135,12 +1136,28 @@ function Dashboard({profile,onBack,onEditProfile}){
   const generateShopList=async()=>{
     if(!allMeals.length)return;
     setLoadingShop(true);
+    setShopError("");
     try{
-      const names=allMeals.map(m=>m.day.slice(0,3)+" "+m.slot+": "+m.name).join("\n");
-      const txt=await claude('Grouped shopping list for:\n'+names+'\n\nReturn ONLY JSON object with category arrays: {"Produce":[],"Meat & Fish":[],"Dairy":[],"Pantry":[],"Frozen":[],"Bakery":[],"Other":[]}. Specific quantities. Non-empty categories only.',1200);
-      const m=txt.match(/\{[\s\S]*\}/);
-      setShopList(JSON.parse(m[0]));setChecked({});
-    }catch{alert("Could not generate list. Check internet.");}
+      // Deduplicate: count how many times each unique meal appears
+      const mealCounts={};
+      allMeals.forEach(m=>{mealCounts[m.name]=(mealCounts[m.name]||0)+1;});
+      const uniqueMeals=Object.entries(mealCounts).map(([name,count])=>count>1?name+" x"+count:name);
+      const names=uniqueMeals.join(", ");
+      const prompt='You are a shopping assistant. Create a grouped grocery list for someone cooking these meals this week: '+names+'. Return ONLY a valid JSON object, nothing else, no explanation, no markdown. Use exactly these category keys: {"Produce":[],"Meat & Fish":[],"Dairy":[],"Pantry":[],"Frozen":[],"Bakery":[],"Other":[]}. Each value is an array of strings with specific quantities, e.g. "3 chicken breasts", "2 bananas". Consolidate ingredients used across multiple meals. Include only non-empty categories.';
+      const txt=await claude(prompt,1500);
+      // Strip markdown fences if present
+      const clean=txt.replace(/```json|```/g,"").trim();
+      // Extract JSON object
+      const match=clean.match(/\{[\s\S]*\}/);
+      if(!match)throw new Error("No JSON found in response");
+      const parsed=JSON.parse(match[0]);
+      // Validate it's an object with at least one array
+      if(typeof parsed!=="object"||!Object.values(parsed).some(v=>Array.isArray(v)&&v.length>0))
+        throw new Error("Empty or invalid shopping list returned");
+      setShopList(parsed);setChecked({});
+    }catch(e){
+      setShopError("Could not generate list: "+(e.message||"Unknown error")+". Try again.");
+    }
     setLoadingShop(false);
   };
   const CAT_ICONS={"Produce":"🥦","Meat & Fish":"🥩","Dairy":"🥛","Pantry":"🫙","Frozen":"🧊","Bakery":"🍞","Other":"🛍️"};
@@ -1265,10 +1282,21 @@ function Dashboard({profile,onBack,onEditProfile}){
             <div style={{background:C.card,borderRadius:16,padding:20,border:"1px solid "+C.border}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                 <div><div style={{fontSize:16,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif"}}>🛒 Shopping List</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{allMeals.length} meals · {shopList?checkedCount+"/"+totalItems+" ticked":"tap Generate"}</div></div>
-                <button onClick={generateShopList} disabled={loadingShop} style={{background:C.accent,border:"none",borderRadius:10,padding:"10px 16px",color:"#0f1a0f",fontWeight:700,fontSize:13,cursor:loadingShop?"wait":"pointer"}}>{loadingShop?"⏳…":shopList?"↻ Refresh":"✨ Generate"}</button>
+                <button onClick={()=>{setShopError("");generateShopList();}} disabled={loadingShop} style={{background:C.accent,border:"none",borderRadius:10,padding:"10px 16px",color:"#0f1a0f",fontWeight:700,fontSize:13,cursor:loadingShop?"wait":"pointer"}}>{loadingShop?"⏳…":shopList?"↻ Refresh":"✨ Generate"}</button>
               </div>
-              {allMeals.map((m,i)=><div key={i} style={{display:"flex",gap:8,fontSize:11,marginBottom:4}}><span style={{color:C.border,minWidth:86}}>{m.day.slice(0,3)} · {m.slot}</span><span style={{color:C.text}}>{m.name}</span></div>)}
+              {(()=>{
+                // Group by day for tidy summary
+                const byDay={};
+                allMeals.forEach(m=>{if(!byDay[m.day])byDay[m.day]=[];byDay[m.day].push(m.name);});
+                return Object.entries(byDay).map(([day,names])=>(
+                  <div key={day} style={{display:"flex",gap:8,fontSize:11,marginBottom:5,alignItems:"flex-start"}}>
+                    <span style={{color:C.border,minWidth:72,flexShrink:0,paddingTop:1}}>{day.slice(0,3)}</span>
+                    <span style={{color:C.text,lineHeight:1.5}}>{names.join(", ")}</span>
+                  </div>
+                ));
+              })()}
             </div>
+            {shopError&&!loadingShop&&<div style={{background:"#2a1515",border:"1px solid "+C.danger,borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"flex-start",gap:12}}><span style={{fontSize:22,flexShrink:0}}>⚠️</span><div><div style={{fontSize:13,color:C.danger,fontWeight:600,marginBottom:4}}>Could not generate shopping list</div><div style={{fontSize:12,color:C.muted,lineHeight:1.5,marginBottom:8}}>{shopError}</div><button onClick={()=>{setShopError("");generateShopList();}} style={{background:C.accent,border:"none",borderRadius:8,padding:"8px 16px",color:"#0f1a0f",fontWeight:700,fontSize:12,cursor:"pointer"}}>↻ Try Again</button></div></div>}
             {shopList&&Object.entries(shopList).filter(([,items])=>items.length>0).map(([cat,items])=>(
               <div key={cat} style={{background:C.card,borderRadius:14,padding:18,border:"1px solid "+C.border}}>
                 <div style={{fontSize:13,fontWeight:700,color:C.accent,marginBottom:12}}>{CAT_ICONS[cat]||"🛍️"} {cat} <span style={{fontSize:10,color:C.muted,fontWeight:400}}>{items.filter((_,i)=>checked[cat+i]).length}/{items.length}</span></div>
