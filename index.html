@@ -134,6 +134,44 @@ const NDB=[
   {n:"Sushi roll salmon",b:"",c:148,p:7.4,cr:19,f:4.3},{n:"Fried rice",b:"",c:163,p:3.4,cr:28,f:4.5},
   {n:"Biryani chicken",b:"",c:174,p:11,cr:23,f:4.2},{n:"Shawarma wrap",b:"",c:207,p:13,cr:21,f:7.8},
 ];
+
+/* ─── Natural serving sizes for whole foods ─────────────────────────────────── */
+const NATURAL_SERVINGS={
+  "egg":          {unit:"egg",   sizes:[{l:"small",g:38},{l:"medium",g:44},{l:"large",g:50},{l:"extra large",g:56}], def:1},
+  "boiled egg":   {unit:"egg",   sizes:[{l:"small",g:38},{l:"medium",g:44},{l:"large",g:50}], def:1},
+  "fried egg":    {unit:"egg",   sizes:[{l:"small",g:46},{l:"medium",g:54},{l:"large",g:62}], def:1},
+  "scrambled egg":{unit:"egg",   sizes:[{l:"small",g:55},{l:"medium",g:65},{l:"large",g:75}], def:1},
+  "egg white":    {unit:"white", sizes:[{l:"1 white",g:33},{l:"2 whites",g:66},{l:"3 whites",g:99}], def:0},
+  "banana":       {unit:"banana",sizes:[{l:"small",g:81},{l:"medium",g:118},{l:"large",g:136}], def:1},
+  "apple":        {unit:"apple", sizes:[{l:"small",g:101},{l:"medium",g:138},{l:"large",g:223}], def:1},
+  "orange":       {unit:"orange",sizes:[{l:"small",g:96},{l:"medium",g:131},{l:"large",g:184}], def:1},
+  "pear":         {unit:"pear",  sizes:[{l:"small",g:120},{l:"medium",g:178},{l:"large",g:230}], def:1},
+  "peach":        {unit:"peach", sizes:[{l:"small",g:100},{l:"medium",g:150},{l:"large",g:200}], def:1},
+  "mango":        {unit:"mango", sizes:[{l:"whole",g:336},{l:"half",g:168},{l:"cup sliced",g:165}], def:1},
+  "kiwi":         {unit:"kiwi",  sizes:[{l:"small",g:69},{l:"medium",g:76},{l:"large",g:91}], def:1},
+  "avocado":      {unit:"avocado",sizes:[{l:"¼ avocado",g:37},{l:"½ avocado",g:75},{l:"whole",g:150}], def:1},
+  "potato":       {unit:"potato",sizes:[{l:"small",g:100},{l:"medium",g:150},{l:"large",g:300}], def:1},
+  "sweet potato": {unit:"potato",sizes:[{l:"small",g:100},{l:"medium",g:150},{l:"large",g:200}], def:1},
+  "carrot":       {unit:"carrot",sizes:[{l:"small",g:50},{l:"medium",g:80},{l:"large",g:110}], def:0},
+  "chicken breast":{unit:"breast",sizes:[{l:"small (120g)",g:120},{l:"medium (150g)",g:150},{l:"large (200g)",g:200}], def:1},
+  "salmon":       {unit:"fillet",sizes:[{l:"small (100g)",g:100},{l:"medium (150g)",g:150},{l:"large (200g)",g:200}], def:1},
+  "tuna":         {unit:"can",   sizes:[{l:"half can (80g)",g:80},{l:"standard can (160g)",g:160}], def:0},
+  "pancake":      {unit:"pancake",sizes:[{l:"small",g:38},{l:"medium",g:55},{l:"large",g:77}], def:2},
+  "bagel":        {unit:"bagel", sizes:[{l:"mini",g:70},{l:"regular",g:98},{l:"large",g:130}], def:0},
+};
+
+function getNaturalServing(name){
+  if(!name)return null;
+  const lower=name.toLowerCase();
+  // exact match first
+  if(NATURAL_SERVINGS[lower])return NATURAL_SERVINGS[lower];
+  // partial match
+  for(const key of Object.keys(NATURAL_SERVINGS)){
+    if(lower.includes(key)||key.includes(lower.split(" ")[0]))return NATURAL_SERVINGS[key];
+  }
+  return null;
+}
+
 function searchDB(q){
   const words=q.toLowerCase().trim().split(/\s+/).filter(Boolean);
   return NDB.map(item=>{
@@ -146,15 +184,33 @@ function searchDB(q){
 
 /* ─── Helpers ───────────────────────────────────────────────────────────────── */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
-function calcDefaults(wkg,hcm,age,goal){
-  const bmr=10*wkg+6.25*hcm-5*age+5,tdee=bmr*1.55;
+function calcTDEE(wkg,hcm,age){
+  return Math.round((10*wkg+6.25*hcm-5*age+5)*1.55);
+}
+function calcDefaults(wkg,hcm,age,goal,calOverride){
+  const tdee=calcTDEE(wkg,hcm,age);
   const adj={loss:-500,maintain:0,gain:500,build:300};
-  const calories=Math.round(tdee+(adj[goal]||0));
+  const calories=calOverride||Math.round(tdee+(adj[goal]||0));
   const pm={loss:2,maintain:1.6,gain:1.8,build:2.2};
   const protein=Math.round(wkg*(pm[goal]||1.6));
   const fat=Math.round(calories*0.25/9);
   const carbs=Math.max(20,Math.round((calories-protein*4-fat*9)/4));
-  return{calories,protein,carbs,fat};
+  return{calories,protein,carbs,fat,tdee};
+}
+// Calculate daily calorie target from goal, current weight, target weight, weeks
+function calcCaloriesFromGoal(wkg,hcm,age,goal,targetWkg,weeks){
+  const tdee=calcTDEE(wkg,hcm,age);
+  if(goal==="maintain")return{calories:tdee,note:""};
+  if(!targetWkg||!weeks||weeks<=0)return{calories:Math.round(tdee+(goal==="loss"?-500:500)),note:""};
+  const diff=targetWkg-wkg; // negative = loss, positive = gain
+  const totalKcal=diff*7700; // 1kg ≈ 7700 kcal
+  const dailyAdj=Math.round(totalKcal/(weeks*7));
+  // Cap at sensible limits
+  const capped=Math.max(-1000,Math.min(1000,dailyAdj));
+  const calories=Math.max(1200,Math.round(tdee+capped));
+  const actualWeeks=Math.abs(Math.round(totalKcal/(capped*7)));
+  const note=capped!==dailyAdj?`Adjusted to safe limit. Realistic timeframe: ~${actualWeeks} weeks.`:"";
+  return{calories,note,dailyAdj:capped};
 }
 function calcBurn(wkg,actId,mins,intId){
   const a=ACTIVITY_TYPES.find(x=>x.id===actId)||ACTIVITY_TYPES[0];
@@ -284,8 +340,10 @@ function ProfileForm({existing,onSave,onCancel}){
     name:existing.name,avatar:existing.avatar||"🧑",
     age:existing.age,height:existing.unit==="imperial"?Math.round(existing.heightCm/2.54):existing.heightCm,
     weight:existing.unit==="imperial"?Math.round(existing.weightKg/0.453592):existing.weightKg,
-    unit:existing.unit||"metric",goal:existing.goal
-  }:{name:"",avatar:"🧑",age:"",height:"",weight:"",unit:"metric",goal:""});
+    unit:existing.unit||"metric",goal:existing.goal,
+    targetWeight:existing.targetWeightKg?(existing.unit==="imperial"?Math.round(existing.targetWeightKg/0.453592):Math.round(existing.targetWeightKg)):"",
+    weeks:existing.weeks||""
+  }:{name:"",avatar:"🧑",age:"",height:"",weight:"",unit:"metric",goal:"",targetWeight:"",weeks:""});
   const[pickingAvatar,setPickingAvatar]=useState(false);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const valid=form.name.trim()&&form.age&&form.height&&form.weight&&form.goal;
@@ -293,17 +351,33 @@ function ProfileForm({existing,onSave,onCancel}){
   const handleSave=()=>{
     let wkg=parseFloat(form.weight),hcm=parseFloat(form.height);
     if(form.unit==="imperial"){wkg*=0.453592;hcm*=2.54;}
-    const def=calcDefaults(wkg,hcm,parseFloat(form.age),form.goal);
+    let targetWkg=form.targetWeight?parseFloat(form.targetWeight):null;
+    if(targetWkg&&form.unit==="imperial")targetWkg*=0.453592;
+    const weeks=form.weeks?parseInt(form.weeks):null;
+    const{calories,note}=calcCaloriesFromGoal(wkg,hcm,parseFloat(form.age),form.goal,targetWkg,weeks);
+    const def=calcDefaults(wkg,hcm,parseFloat(form.age),form.goal,calories);
     const profile={
       id:existing?.id||uid(),
       name:form.name.trim(),avatar:form.avatar,
       age:parseFloat(form.age),weightKg:wkg,heightCm:hcm,
       unit:form.unit,goal:form.goal,
+      targetWeightKg:targetWkg,weeks:weeks,
       targets:{...def,_wkg:wkg,_hcm:hcm,_age:parseFloat(form.age)},
       lastActive:Date.now(),
     };
     onSave(profile,def);
   };
+  // live preview of recommended calories
+  const caloriePreview=React.useMemo(()=>{
+    const wkg=parseFloat(form.weight),hcm=parseFloat(form.height),age=parseFloat(form.age);
+    if(!wkg||!hcm||!age||!form.goal)return null;
+    let wkgM=wkg,hcmM=hcm;
+    if(form.unit==="imperial"){wkgM*=0.453592;hcmM*=2.54;}
+    let targetWkg=form.targetWeight?parseFloat(form.targetWeight):null;
+    if(targetWkg&&form.unit==="imperial")targetWkg*=0.453592;
+    const weeks=form.weeks?parseInt(form.weeks):null;
+    return calcCaloriesFromGoal(wkgM,hcmM,age,form.goal,targetWkg,weeks);
+  },[form.weight,form.height,form.age,form.goal,form.targetWeight,form.weeks,form.unit]);
 
   return(
     <div style={{maxWidth:520,margin:"0 auto",padding:"0 16px 40px"}}>
@@ -361,6 +435,48 @@ function ProfileForm({existing,onSave,onCancel}){
           </div>
         </div>
 
+        {/* Goal target + timeframe — only for loss/gain/build */}
+        {form.goal&&form.goal!=="maintain"&&(
+          <div style={{marginBottom:24}}>
+            <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:12}}>Goal Details <span style={{color:C.border,fontWeight:400,textTransform:"none"}}>(optional but recommended)</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>
+                <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6}}>
+                  {form.goal==="loss"?"Target weight":"Target weight"} <span style={{color:C.border}}>({form.unit==="metric"?"kg":"lbs"})</span>
+                </label>
+                <input type="number" placeholder={form.unit==="metric"?"65":"145"} value={form.targetWeight} onChange={e=>set("targetWeight",e.target.value)}
+                  style={{width:"100%",padding:"12px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.surf,color:C.text,fontSize:15,fontFamily:"'DM Mono',monospace",boxSizing:"border-box",outline:"none"}}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6}}>Timeframe <span style={{color:C.border}}>(weeks)</span></label>
+                <input type="number" placeholder="12" value={form.weeks} onChange={e=>set("weeks",e.target.value)}
+                  style={{width:"100%",padding:"12px 10px",borderRadius:10,border:"1px solid "+C.border,background:C.surf,color:C.text,fontSize:15,fontFamily:"'DM Mono',monospace",boxSizing:"border-box",outline:"none"}}/>
+              </div>
+            </div>
+            {/* Quick timeframe picks */}
+            <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+              {[{l:"4 weeks",v:4},{l:"8 weeks",v:8},{l:"12 weeks",v:12},{l:"6 months",v:26},{l:"1 year",v:52}].map(({l,v})=>(
+                <button key={v} onClick={()=>set("weeks",v)} style={{padding:"5px 10px",borderRadius:8,border:"1px solid "+(parseInt(form.weeks)===v?C.accent:C.border),background:parseInt(form.weeks)===v?"#1e2e1e":C.surf,color:parseInt(form.weeks)===v?C.accent:C.muted,fontSize:11,cursor:"pointer"}}>{l}</button>
+              ))}
+            </div>
+            {/* Live calorie preview */}
+            {caloriePreview&&(
+              <div style={{marginTop:14,padding:"14px 16px",borderRadius:12,background:caloriePreview.note?"#2a1e0a":"#1a2e1a",border:"1px solid "+(caloriePreview.note?C.warn:C.dim)}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{fontSize:12,color:C.muted}}>Recommended daily calories</span>
+                  <span style={{fontSize:20,fontWeight:700,color:C.gold,fontFamily:"'DM Mono',monospace"}}>{caloriePreview.calories} kcal</span>
+                </div>
+                {form.targetWeight&&form.weeks&&(
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                    {Math.abs(parseFloat(form.targetWeight)-(form.unit==="imperial"?Math.round(parseFloat(form.weight)):parseFloat(form.weight))).toFixed(1)}{form.unit==="metric"?"kg":"lbs"} {form.goal==="loss"?"to lose":"to gain"} in {form.weeks} weeks
+                    {" → "}<span style={{color:C.accent}}>{Math.abs(caloriePreview.dailyAdj||0)} kcal/day {form.goal==="loss"?"deficit":"surplus"}</span>
+                  </div>
+                )}
+                {caloriePreview.note&&<div style={{fontSize:11,color:C.warn,marginTop:6}}>⚠️ {caloriePreview.note}</div>}
+              </div>
+            )}
+          </div>
+        )}
         <button disabled={!valid} onClick={handleSave} style={{width:"100%",padding:"16px 0",borderRadius:12,border:"none",cursor:valid?"pointer":"not-allowed",background:valid?C.accent:C.border,color:"#0f1a0f",fontWeight:700,fontSize:15,fontFamily:"'DM Sans',sans-serif",opacity:valid?1:0.5}}>
           {existing?"Save Changes":"Create Profile →"}
         </button>
@@ -520,10 +636,69 @@ function MealCell({day,meal,value,onEdit,onRecipe,onRemoveItem,onClearSlot}){
   );
 }
 
-/* ─── Nutrition Card ─────────────────────────────────────────────────────────── */
+/* ─── Nutrition Card — natural servings for whole foods, grams for others ──────── */
 function NutritionCard({item,onAdd,onClose,onRecipe}){
+  const ns=getNaturalServing(item.name);
+  // Natural serving mode (eggs, fruits, etc.)
+  const[sizeIdx,setSizeIdx]=useState(ns?ns.def:0);
+  const[count,setCount]=useState(1);
+  // Gram mode fallback
   const[grams,setGrams]=useState(100);
-  const s=grams/100,cal=Math.round(item.cal100*s),prot=Math.round(item.prot100*s*10)/10,carb=Math.round(item.carb100*s*10)/10,fat=Math.round(item.fat100*s*10)/10;
+
+  const getCalc=(g)=>{const s=g/100;return{cal:Math.round(item.cal100*s),prot:Math.round(item.prot100*s*10)/10,carb:Math.round(item.carb100*s*10)/10,fat:Math.round(item.fat100*s*10)/10};};
+
+  if(ns){
+    const size=ns.sizes[sizeIdx];
+    const totalG=size.g*count;
+    const{cal,prot,carb,fat}=getCalc(totalG);
+    const label=count===1?`1 ${size.l} ${ns.unit}`:`${count} ${size.l} ${ns.unit}s`;
+    return(
+      <div style={{background:"#111e11",border:"1px solid "+C.dim,borderRadius:14,padding:"14px 16px",marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+          <div style={{flex:1,paddingRight:8}}><div style={{fontSize:14,fontWeight:700,color:C.text,lineHeight:1.3}}>{item.name}</div>{item.brand&&<div style={{fontSize:10,color:C.muted,marginTop:2}}>{item.brand}</div>}</div>
+          <div style={{fontSize:18,fontWeight:700,color:C.gold,fontFamily:"'DM Mono',monospace"}}>{cal} <span style={{fontSize:10,color:C.muted}}>kcal</span></div>
+        </div>
+        {/* Size picker */}
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Size</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {ns.sizes.map((s,i)=>(
+              <button key={i} onClick={()=>setSizeIdx(i)} style={{padding:"5px 10px",borderRadius:8,border:"1px solid "+(sizeIdx===i?C.accent:C.border),background:sizeIdx===i?"#1e2e1e":C.surf,color:sizeIdx===i?C.accent:C.muted,fontSize:11,cursor:"pointer",fontWeight:sizeIdx===i?700:400}}>
+                {s.l} <span style={{fontSize:9,opacity:0.6}}>({s.g}g)</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* Count */}
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{fontSize:10,color:C.muted}}>Quantity</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:"auto"}}>
+            <button onClick={()=>setCount(c=>Math.max(1,c-1))} style={{width:28,height:28,borderRadius:"50%",border:"1px solid "+C.border,background:C.surf,color:C.text,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <span style={{fontSize:16,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace",minWidth:24,textAlign:"center"}}>{count}</span>
+            <button onClick={()=>setCount(c=>Math.min(20,c+1))} style={{width:28,height:28,borderRadius:"50%",border:"1px solid "+C.border,background:C.surf,color:C.text,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+          </div>
+        </div>
+        {/* Macros */}
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          {[["Protein",prot,C.accent],["Carbs",carb,C.blue],["Fat",fat,C.warn]].map(([l,v,col])=>(
+            <div key={l} style={{flex:1,background:C.surf,borderRadius:8,padding:"6px 4px",textAlign:"center",border:"1px solid "+C.border}}>
+              <div style={{fontSize:13,fontWeight:700,color:col,fontFamily:"'DM Mono',monospace"}}>{v}g</div>
+              <div style={{fontSize:9,color:C.muted,textTransform:"uppercase"}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>{onAdd({name:item.name+(count>1?" x"+count:"")+" ("+size.l+")",calories:cal,protein:prot,carbs:carb,fat});onClose();}}
+            style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",background:C.accent,color:"#0f1a0f",fontWeight:700,fontSize:13,cursor:"pointer"}}>+ Add {label}</button>
+          <button onClick={()=>onRecipe({name:item.name,calories:cal,protein:prot,carbs:carb,fat})}
+            style={{flex:1,padding:"11px 0",borderRadius:10,border:"1px solid "+C.border,background:C.surf,color:C.accent,fontWeight:600,fontSize:12,cursor:"pointer"}}>📖 Recipe</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Gram-based mode (packaged/processed foods)
+  const{cal,prot,carb,fat}=getCalc(grams);
   return(
     <div style={{background:"#111e11",border:"1px solid "+C.dim,borderRadius:14,padding:"14px 16px",marginBottom:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
@@ -550,8 +725,10 @@ function NutritionCard({item,onAdd,onClose,onRecipe}){
         {[50,100,150,200,300].map(g=><button key={g} onClick={()=>setGrams(g)} style={{flex:1,padding:"4px 0",borderRadius:6,border:"1px solid "+(grams===g?C.accent:C.border),background:grams===g?"#1e2e1e":C.surf,color:grams===g?C.accent:C.muted,fontSize:10,cursor:"pointer"}}>{g}g</button>)}
       </div>
       <div style={{display:"flex",gap:8}}>
-        <button onClick={()=>{onAdd({name:item.name,calories:cal,protein:prot,carbs:carb,fat});onClose();}} style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",background:C.accent,color:"#0f1a0f",fontWeight:700,fontSize:13,cursor:"pointer"}}>+ Add {grams}g</button>
-        <button onClick={()=>onRecipe({name:item.name,calories:cal,protein:prot,carbs:carb,fat})} style={{flex:1,padding:"11px 0",borderRadius:10,border:"1px solid "+C.border,background:C.surf,color:C.accent,fontWeight:600,fontSize:12,cursor:"pointer"}}>📖 Recipe</button>
+        <button onClick={()=>{onAdd({name:item.name,calories:cal,protein:prot,carbs:carb,fat});onClose();}}
+          style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",background:C.accent,color:"#0f1a0f",fontWeight:700,fontSize:13,cursor:"pointer"}}>+ Add {grams}g</button>
+        <button onClick={()=>onRecipe({name:item.name,calories:cal,protein:prot,carbs:carb,fat})}
+          style={{flex:1,padding:"11px 0",borderRadius:10,border:"1px solid "+C.border,background:C.surf,color:C.accent,fontWeight:600,fontSize:12,cursor:"pointer"}}>📖 Recipe</button>
       </div>
     </div>
   );
@@ -778,6 +955,101 @@ function MealEditor({day,meal,profile,targets,onClose,onSave}){
   );
 }
 
+/* ─── Copy Day Modal ─────────────────────────────────────────────────────────── */
+function CopyDayModal({sourceDay,plan,onCopy,onClose}){
+  const others=DAYS.filter(d=>d!==sourceDay);
+  const[selected,setSelected]=useState([]);
+  const[overwrite,setOverwrite]=useState("merge"); // "merge" | "replace"
+  const toggle=d=>setSelected(s=>s.includes(d)?s.filter(x=>x!==d):[...s,d]);
+  const allFilled=d=>MEALS.some(m=>slotItems(plan[d]?.[m]).length>0);
+  const hasConflict=selected.some(allFilled);
+
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.card,borderRadius:20,padding:24,maxWidth:420,width:"100%",border:"1px solid "+C.border,maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div>
+            <div style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>Copy meals from</div>
+            <div style={{fontSize:20,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif"}}>{sourceDay}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer"}}>✕</button>
+        </div>
+
+        {/* Source day summary */}
+        <div style={{background:C.surf,borderRadius:12,padding:"12px 14px",marginBottom:18,border:"1px solid "+C.dim}}>
+          <div style={{fontSize:11,color:C.accent,fontWeight:600,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Copying these meals</div>
+          {MEALS.map(m=>{
+            const items=slotItems(plan[sourceDay]?.[m]);
+            if(!items.length)return null;
+            return(
+              <div key={m} style={{display:"flex",gap:8,marginBottom:4,alignItems:"flex-start"}}>
+                <span style={{fontSize:10,color:C.border,minWidth:68,paddingTop:1}}>{m}</span>
+                <div style={{flex:1}}>
+                  {items.map((item,i)=>(
+                    <span key={i} style={{fontSize:11,color:C.text}}>{item.name}{i<items.length-1?", ":""}</span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {!MEALS.some(m=>slotItems(plan[sourceDay]?.[m]).length>0)&&(
+            <div style={{fontSize:12,color:C.muted}}>No meals planned on {sourceDay} yet.</div>
+          )}
+        </div>
+
+        {/* Day picker */}
+        <div style={{fontSize:12,color:C.text,fontWeight:600,marginBottom:12}}>Copy to which days?</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
+          {others.map(d=>{
+            const sel=selected.includes(d);
+            const hasMeals=allFilled(d);
+            return(
+              <button key={d} onClick={()=>toggle(d)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:12,border:"2px solid "+(sel?C.accent:C.border),background:sel?"#1e2e1e":C.surf,cursor:"pointer",textAlign:"left",width:"100%"}}>
+                <div style={{width:22,height:22,borderRadius:6,border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  {sel&&<span style={{fontSize:13,color:"#0f1a0f",fontWeight:700}}>✓</span>}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600,color:sel?C.accent:C.text}}>{d}</div>
+                  {hasMeals&&<div style={{fontSize:10,color:C.warn,marginTop:1}}>Has existing meals</div>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Quick-select buttons */}
+        <div style={{display:"flex",gap:8,marginBottom:18}}>
+          <button onClick={()=>setSelected(others)} style={{flex:1,padding:"8px 0",borderRadius:8,border:"1px solid "+C.border,background:C.surf,color:C.muted,fontSize:11,cursor:"pointer"}}>Select All</button>
+          <button onClick={()=>setSelected(DAYS.filter(d=>d!==sourceDay&&!allFilled(d)))} style={{flex:1,padding:"8px 0",borderRadius:8,border:"1px solid "+C.border,background:C.surf,color:C.muted,fontSize:11,cursor:"pointer"}}>Empty Days Only</button>
+          <button onClick={()=>setSelected([])} style={{flex:1,padding:"8px 0",borderRadius:8,border:"1px solid "+C.border,background:C.surf,color:C.muted,fontSize:11,cursor:"pointer"}}>Clear</button>
+        </div>
+
+        {/* Overwrite mode — only show if conflicts exist */}
+        {hasConflict&&(
+          <div style={{marginBottom:18}}>
+            <div style={{fontSize:12,color:C.warn,fontWeight:600,marginBottom:10}}>⚠️ Some selected days have existing meals</div>
+            <div style={{display:"flex",gap:8}}>
+              {[{id:"merge",l:"Merge",desc:"Keep existing, add copied"},{id:"replace",l:"Replace",desc:"Clear day then copy"}].map(opt=>(
+                <button key={opt.id} onClick={()=>setOverwrite(opt.id)} style={{flex:1,padding:"10px 8px",borderRadius:10,border:"2px solid "+(overwrite===opt.id?C.accent:C.border),background:overwrite===opt.id?"#1e2e1e":C.surf,cursor:"pointer",textAlign:"center"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:overwrite===opt.id?C.accent:C.text}}>{opt.l}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          disabled={!selected.length||!MEALS.some(m=>slotItems(plan[sourceDay]?.[m]).length>0)}
+          onClick={()=>{onCopy(selected,overwrite);onClose();}}
+          style={{width:"100%",padding:"14px 0",borderRadius:12,border:"none",background:selected.length&&MEALS.some(m=>slotItems(plan[sourceDay]?.[m]).length>0)?C.accent:C.border,color:"#0f1a0f",fontWeight:700,fontSize:14,cursor:selected.length?"pointer":"not-allowed",opacity:selected.length?1:0.5}}>
+          Copy to {selected.length} day{selected.length!==1?"s":""}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Dashboard ──────────────────────────────────────────────────────────────── */
 function Dashboard({profile,onBack,onEditProfile}){
   // Load saved data for this profile
@@ -796,6 +1068,7 @@ function Dashboard({profile,onBack,onEditProfile}){
   const[showActivity,setShowActivity]=useState(false);
   const[viewRecipe,setViewRecipe]=useState(null);
   const[loadingShop,setLoadingShop]=useState(false);
+  const[showCopy,setShowCopy]=useState(false);
 
   // Auto-save whenever key state changes
   useEffect(()=>{
@@ -846,6 +1119,7 @@ function Dashboard({profile,onBack,onEditProfile}){
     <div style={{maxWidth:880,margin:"0 auto",padding:"0 16px 40px"}}>
       {viewRecipe&&<RecipeModal meal={viewRecipe} onClose={()=>setViewRecipe(null)}/>}
       {showAllowances&&<AllowancesEditor targets={targets} onSave={t=>setTargets(t)} onClose={()=>setShowAllowances(false)}/>}
+      {showCopy&&<CopyDayModal sourceDay={activeDay} plan={plan} onClose={()=>setShowCopy(false)} onCopy={(days,mode)=>{setPlan(p=>{const src=p[activeDay]||{};const next={...p};days.forEach(d=>{if(mode==="replace"){next[d]={...src};}else{const existing=p[d]||{};const merged={};MEALS.forEach(m=>{const srcItems=slotItems(src[m]);const existItems=slotItems(existing[m]);merged[m]=[...existItems,...srcItems].filter(Boolean)||undefined;if(merged[m]&&!merged[m].length)delete merged[m];});next[d]=merged;}});return next;});}}/>}
       {showActivity&&<ActivityLogger weightKg={profile.weightKg} activities={activities} onAdd={a=>setActivities(p=>[...p,a])} onRemove={i=>setActivities(p=>p.filter((_,idx)=>idx!==i))} onClose={()=>setShowActivity(false)}/>}
       {editing&&<MealEditor day={editing.day} meal={editing.meal} profile={profile} targets={targets} onClose={()=>setEditing(null)} onSave={m=>setPlan(p=>{const slot=slotItems(p[editing.day]?.[editing.meal]);return{...p,[editing.day]:{...(p[editing.day]||{}),[editing.meal]:[...slot,m]}};})}/>}
 
@@ -917,6 +1191,11 @@ function Dashboard({profile,onBack,onEditProfile}){
               {filled>0&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>{dCal} kcal</div>}
             </button>
           );})}
+        </div>
+        {/* Copy day bar */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,background:C.surf,borderRadius:10,padding:'8px 14px',border:'1px solid '+C.border,marginTop:8}}>
+          <div style={{fontSize:12,color:C.muted}}>{activeDay}'s meals</div>
+          <button onClick={()=>setShowCopy(true)} style={{display:'flex',alignItems:'center',gap:6,padding:'6px 12px',borderRadius:8,border:'1px solid '+C.dim,background:'none',color:C.accent,fontSize:12,fontWeight:600,cursor:'pointer'}}><span style={{fontSize:14}}>📋</span> Copy to other days</button>
         </div>
         <div style={{background:C.card,borderRadius:16,padding:20,border:"1px solid "+C.border}}>
           <div style={{fontSize:16,fontWeight:700,color:C.text,fontFamily:"'Playfair Display',serif",marginBottom:16}}>{activeDay}'s Meals</div>
