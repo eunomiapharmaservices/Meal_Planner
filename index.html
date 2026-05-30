@@ -577,9 +577,11 @@ function RecipeModal({meal,onClose,onAdd}){
 /* ─── Meal Cell — supports multiple items per slot ───────────────────────────── */
 function MealCell({day,meal,value,onEdit,onRecipe,onRemoveItem,onClearSlot}){
   const[open,setOpen]=useState(false);
+  const[deleteConfirm,setDeleteConfirm]=useState(null); // index to confirm delete
   const items=slotItems(value);
   const total=slotKcal(value);
   const totalP=Math.round(slotMacro(value,"protein")*10)/10;
+
   if(items.length===0){
     return(
       <div onClick={()=>onEdit(day,meal)}
@@ -588,19 +590,45 @@ function MealCell({day,meal,value,onEdit,onRecipe,onRemoveItem,onClearSlot}){
       </div>
     );
   }
+
   return(
     <div style={{position:"relative"}}>
+      {/* Inline delete confirm overlay */}
+      {deleteConfirm!==null&&(
+        <>
+          <div onClick={()=>setDeleteConfirm(null)} style={{position:"fixed",inset:0,zIndex:59}}/>
+          <div style={{position:"absolute",top:0,left:0,right:0,zIndex:60,background:C.card,borderRadius:10,border:"1px solid "+C.danger,padding:"12px 14px",boxShadow:"0 8px 24px rgba(0,0,0,0.6)"}}>
+            <div style={{fontSize:12,color:C.text,fontWeight:600,marginBottom:4}}>Remove this item?</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.4}}>{items[deleteConfirm]?.name}</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setDeleteConfirm(null)}
+                style={{flex:1,padding:"9px 0",borderRadius:8,border:"1px solid "+C.border,background:"none",color:C.muted,fontSize:12,cursor:"pointer",fontWeight:600}}>
+                Cancel
+              </button>
+              <button onClick={(e)=>{e.stopPropagation();onRemoveItem(day,meal,deleteConfirm);setDeleteConfirm(null);}}
+                style={{flex:1,padding:"9px 0",borderRadius:8,border:"none",background:C.danger,color:"#fff",fontSize:12,cursor:"pointer",fontWeight:700}}>
+                🗑 Remove
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       <div style={{borderRadius:10,border:"1px solid "+C.dim,background:"#1a2e1a",overflow:"visible"}}>
         {/* Items list */}
         <div style={{padding:"8px 10px"}}>
           {items.map((item,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:i<items.length-1?5:0}}>
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",borderRadius:8,marginBottom:i<items.length-1?4:0,background:"transparent"}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.text,lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.name}</div>
-                <div style={{fontSize:9,color:C.muted}}>{item.calories} kcal{item.protein?" · P "+item.protein+"g":""}</div>
+                <div style={{fontSize:9,color:C.muted,marginTop:1}}>{item.calories} kcal{item.protein?" · P "+item.protein+"g":""}</div>
               </div>
-              <button onClick={(e)=>{e.stopPropagation();onRemoveItem(day,meal,i);}}
-                style={{background:"none",border:"none",color:C.border,fontSize:13,cursor:"pointer",padding:"2px 4px",flexShrink:0,lineHeight:1}}>✕</button>
+              <button
+                onClick={(e)=>{e.stopPropagation();setDeleteConfirm(i);setOpen(false);}}
+                title="Remove item"
+                style={{width:26,height:26,borderRadius:"50%",border:"1px solid "+C.danger+"55",background:"#2a1515",color:C.danger,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontWeight:700}}>
+                🗑
+              </button>
             </div>
           ))}
         </div>
@@ -622,9 +650,13 @@ function MealCell({day,meal,value,onEdit,onRecipe,onRemoveItem,onClearSlot}){
         <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:C.card,borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",boxShadow:"0 8px 24px rgba(0,0,0,0.5)",marginTop:4}}>
           {items.map((item,i)=>(
             <div key={i}>
-              <button onClick={()=>{setOpen(false);onRecipe(item);}} style={{width:"100%",padding:"11px 14px",background:"none",border:"none",color:C.text,fontSize:12,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
-                <span style={{flex:1,fontWeight:600}}>{item.name}</span><span style={{color:C.muted,fontSize:11}}>📖 Recipe</span>
-              </button>
+              <div style={{display:"flex",alignItems:"center"}}>
+                <button onClick={()=>{setOpen(false);onRecipe(item);}} style={{flex:1,padding:"11px 14px",background:"none",border:"none",color:C.text,fontSize:12,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{flex:1,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:160}}>{item.name}</span>
+                  <span style={{color:C.muted,fontSize:10,flexShrink:0}}>📖 Recipe</span>
+                </button>
+                <button onClick={()=>{setOpen(false);setDeleteConfirm(i);}} style={{padding:"11px 12px",background:"none",border:"none",borderLeft:"1px solid "+C.border+"44",color:C.danger,fontSize:13,cursor:"pointer",flexShrink:0}}>🗑</button>
+              </div>
               {i<items.length-1&&<div style={{height:1,background:C.border+"44"}}/>}
             </div>
           ))}
