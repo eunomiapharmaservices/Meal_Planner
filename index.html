@@ -266,19 +266,13 @@ function ApiKeySetup({onDone}){
   const[err,setErr]=useState("");
   const[show,setShow]=useState(false);
 
-  const testAndSave=async()=>{
-    if(!key.trim()){setErr("Please enter your API key.");return;}
-    if(!key.trim().startsWith("sk-ant-")){setErr("That doesn't look like an Anthropic key. It should start with sk-ant-");return;}
-    setTesting(true);setErr("");
-    saveApiKey(key.trim());
-    try{
-      await claude("Say OK",10);
-      onDone();
-    }catch(e){
-      setErr("Key test failed: "+(e.message||"Check the key and try again."));
-      saveApiKey(""); // clear invalid key
-    }
-    setTesting(false);
+  const testAndSave=()=>{
+    const k=key.trim();
+    if(!k){setErr("Please enter your API key.");return;}
+    if(!k.startsWith("sk-ant-")){setErr("Key should start with sk-ant- — check you copied the full key.");return;}
+    if(k.length<40){setErr("This key looks too short. Make sure you copied the entire key.");return;}
+    saveApiKey(k);
+    onDone();
   };
 
   return(
@@ -332,9 +326,9 @@ function ApiKeySetup({onDone}){
 
         {err&&<div style={{background:"#2a1515",border:"1px solid "+C.danger,borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.danger}}>{err}</div>}
 
-        <button onClick={testAndSave} disabled={!key.trim()||testing}
-          style={{width:"100%",padding:"15px 0",borderRadius:12,border:"none",background:key.trim()&&!testing?C.accent:C.border,color:"#0f1a0f",fontWeight:700,fontSize:15,cursor:key.trim()&&!testing?"pointer":"not-allowed",opacity:key.trim()?1:0.5}}>
-          {testing?"Testing key…":"Save & Continue →"}
+        <button onClick={testAndSave} disabled={!key.trim()}
+          style={{width:"100%",padding:"15px 0",borderRadius:12,border:"none",background:key.trim()?C.accent:C.border,color:"#0f1a0f",fontWeight:700,fontSize:15,cursor:key.trim()?"pointer":"not-allowed",opacity:key.trim()?1:0.5}}>
+          "Save & Continue →"
         </button>
 
         <div style={{textAlign:"center",marginTop:14}}>
